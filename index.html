@@ -349,6 +349,41 @@
       white-space: pre-wrap;
     }
 
+    .login-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: #162231;
+    }
+
+    .login-screen.hidden {
+      display: none;
+    }
+
+    .login-card {
+      width: min(380px, 100%);
+      padding: 28px;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .24);
+    }
+
+    .login-card h2 {
+      margin-bottom: 18px;
+      font-size: 24px;
+    }
+
+    .login-error {
+      min-height: 20px;
+      margin: 10px 0 0;
+      color: var(--danger);
+      font-size: 13px;
+    }
+
     .modal {
       position: fixed;
       inset: 0;
@@ -543,6 +578,22 @@
   </style>
 </head>
 <body>
+  <div class="login-screen" id="loginScreen">
+    <form class="login-card" id="loginForm">
+      <h2>结算工具箱</h2>
+      <label class="field">
+        账号
+        <input id="loginUser" autocomplete="username" value="">
+      </label>
+      <label class="field">
+        密码
+        <input id="loginPassword" type="password" autocomplete="current-password">
+      </label>
+      <button class="button primary" type="submit" style="width:100%">登录</button>
+      <div class="login-error" id="loginError"></div>
+    </form>
+  </div>
+
   <div class="shell">
     <aside class="sidebar">
       <div>
@@ -1312,6 +1363,28 @@
       URL.revokeObjectURL(url);
     }
 
+    function initLogin() {
+      const loginScreen = $("#loginScreen");
+      const loginForm = $("#loginForm");
+      const loginError = $("#loginError");
+      if (sessionStorage.getItem("settlementToolsAuthed") === "1") {
+        loginScreen.classList.add("hidden");
+      }
+
+      loginForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const user = $("#loginUser").value.trim();
+        const password = $("#loginPassword").value;
+        if (user === "admin" && password === "222333") {
+          sessionStorage.setItem("settlementToolsAuthed", "1");
+          loginError.textContent = "";
+          loginScreen.classList.add("hidden");
+          return;
+        }
+        loginError.textContent = "账号或密码不正确";
+      });
+    }
+
     function bind() {
       $("#sourceText").addEventListener("input", render);
       $("#frameworkTotal").addEventListener("input", () => {
@@ -1359,6 +1432,7 @@
     }
 
     $("#sourceText").value = sampleText;
+    initLogin();
     bind();
     render();
     renderFramework();
