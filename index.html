@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>项目结算明细</title>
+  <title>结算工具箱</title>
   <style>
     :root {
       --bg: #f5f7fa;
@@ -39,13 +39,13 @@
     .shell {
       min-height: 100vh;
       display: grid;
-      grid-template-columns: 360px minmax(0, 1fr);
+      grid-template-columns: 300px minmax(0, 1fr);
     }
 
     .sidebar {
       background: #162231;
       color: #fff;
-      padding: 34px 26px;
+      padding: 34px 20px;
     }
 
     h1 {
@@ -67,7 +67,7 @@
     }
 
     main {
-      padding: 38px 34px;
+      padding: 28px 26px;
       min-width: 0;
     }
 
@@ -95,20 +95,20 @@
     .button.tool-tab {
       width: 100%;
       justify-content: flex-start;
-      min-height: 66px;
-      padding: 14px 20px;
+      min-height: 52px;
+      padding: 10px 14px;
       color: #e5edf5;
       border-color: transparent;
       background: transparent;
-      font-size: 22px;
+      font-size: 18px;
       border-radius: 8px;
       white-space: nowrap;
     }
 
     .button.tool-tab svg {
-      width: 24px;
-      height: 24px;
-      margin-right: 6px;
+      width: 20px;
+      height: 20px;
+      margin-right: 4px;
     }
 
     .button.tool-tab.active {
@@ -133,7 +133,7 @@
 
     .tool-view.active {
       display: grid;
-      grid-template-columns: minmax(360px, 430px) minmax(0, 1fr);
+      grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
       gap: 18px;
       align-items: start;
     }
@@ -190,6 +190,8 @@
       resize: vertical;
       font-family: Consolas, "Microsoft YaHei", monospace;
       line-height: 1.6;
+      overflow: auto;
+      white-space: pre;
     }
 
     input:focus,
@@ -288,23 +290,25 @@
 
     table {
       width: 100%;
-      min-width: 1180px;
+      min-width: 0;
       border-collapse: collapse;
       background: #fff;
+      table-layout: fixed;
     }
 
     table.compact-table {
-      min-width: 640px;
+      min-width: 0;
     }
 
     th,
     td {
       border-bottom: 1px solid var(--line);
       border-right: 1px solid var(--line);
-      padding: 8px 9px;
+      padding: 6px 7px;
       text-align: center;
       vertical-align: middle;
-      white-space: nowrap;
+      white-space: normal;
+      word-break: break-word;
     }
 
     th {
@@ -313,9 +317,27 @@
       z-index: 1;
       background: #eeeeee;
       color: #3d4b5c;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
+      white-space: nowrap;
     }
+
+    .settlement-table col:nth-child(1) { width: 7%; }
+    .settlement-table col:nth-child(2) { width: 8%; }
+    .settlement-table col:nth-child(3) { width: 9%; }
+    .settlement-table col:nth-child(4) { width: 10%; }
+    .settlement-table col:nth-child(5) { width: 10%; }
+    .settlement-table col:nth-child(6) { width: 8%; }
+    .settlement-table col:nth-child(7) { width: 9%; }
+    .settlement-table col:nth-child(8) { width: 8%; }
+    .settlement-table col:nth-child(9) { width: 11%; }
+    .settlement-table col:nth-child(10) { width: 20%; }
+
+    .framework-table col:nth-child(1) { width: 12%; }
+    .framework-table col:nth-child(2) { width: 28%; }
+    .framework-table col:nth-child(3) { width: 20%; }
+    .framework-table col:nth-child(4) { width: 18%; }
+    .framework-table col:nth-child(5) { width: 22%; }
 
     td.num,
     th.num {
@@ -641,7 +663,7 @@
         <div class="panel-body">
           <label class="field">
             原始结算文本
-            <textarea id="sourceText" spellcheck="false"></textarea>
+            <textarea id="sourceText" spellcheck="false" wrap="off"></textarea>
           </label>
           <ul class="tips">
             <li>格式：姓名：yyyy-MM-dd到yyyy-MM-dd 每人月单价。</li>
@@ -989,7 +1011,8 @@
 
       $("#previewArea").innerHTML = `
         <div class="table-wrap">
-          <table id="resultTable">
+          <table id="resultTable" class="settlement-table">
+            <colgroup>${columns.map(() => "<col>").join("")}</colgroup>
             <thead>
               <tr>${columns.map((name, index) => `<th class="${index >= 2 && index <= 8 ? "num" : ""}">${name}</th>`).join("")}</tr>
             </thead>
@@ -1275,7 +1298,8 @@
 
       $("#frameworkPreview").innerHTML = `
         <div class="table-wrap">
-          <table>
+          <table class="framework-table">
+            <colgroup>${frameworkColumns.map(() => "<col>").join("")}</colgroup>
             <thead>
               <tr>${frameworkColumns.map(name => `<th>${name}</th>`).join("")}</tr>
             </thead>
