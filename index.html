@@ -200,6 +200,13 @@
       box-shadow: 0 0 0 3px rgba(15, 107, 143, .13);
     }
 
+    .inline-input {
+      width: 96px;
+      min-height: 30px;
+      padding: 4px 7px;
+      text-align: center;
+    }
+
     .actions {
       display: flex;
       flex-wrap: wrap;
@@ -722,10 +729,14 @@
               报价总额（元）
               <input id="frameworkTotal" type="number" min="0" step="0.01" value="300000">
             </label>
+            <label class="field">
+              最高人月（可选）
+              <input id="frameworkMaxMonths" type="number" min="0" step="0.01" placeholder="不限制">
+            </label>
             <ul class="tips">
               <li>固定单价：P2 = 14500，P3-1 = 17000，P3-2及以上 = 19000。</li>
               <li>P3-1 工作量占比控制在 60% - 95%。</li>
-              <li>各职级人月最多保留小数点后两位，费用总计需等于输入总额。</li>
+              <li>各职级人月最多保留小数点后两位，费用总计需等于输入总额，且不超过最高人月。</li>
             </ul>
             <div id="frameworkError" class="error"></div>
           </div>
@@ -832,6 +843,7 @@
     const num2 = new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     let currentRows = [];
     let frameworkRandomSeed = Math.random();
+    let frameworkManualHundredths = {};
 
     const $ = (selector) => document.querySelector(selector);
 
@@ -1203,40 +1215,60 @@
       return rate * hundredths;
     }
 
-    function findFrameworkSplit(totalCents) {
+    function parseMonthHundredths(value) {
+      const text = String(value ?? "").trim();
+      if (!text) return null;
+      const number = Number(text);
+      if (!Number.isFinite(number) || number < 0) return null;
+      return Math.round(number * 100);
+    }
+
+    function getFrameworkMaxHundredths() {
+      const input = $("#frameworkMaxMonths").value.trim();
+      if (!input) return Infinity;
+      const value = parseMonthHundredths(input);
+      return value === null ? -1 : value;
+    }
+
+    function findFrameworkSplit(totalCents, fixedHundredths = {}, maxLimitHundredths = Infinity) {
       if (!Number.isFinite(totalCents) || totalCents <= 0) return null;
+      if (maxLimitHundredths < 0) return null;
 
       const unitGcd = 500;
       if (totalCents % unitGcd !== 0) {
         return null;
       }
 
-      const maxHundredths = Math.floor(totalCents / frameworkCostCents(14500, 1));
+      const possibleMaxHundredths = Math.floor(totalCents / frameworkCostCents(14500, 1));
+      const limitHundredths = Number.isFinite(maxLimitHundredths)
+        ? Math.min(possibleMaxHundredths, Math.floor(maxLimitHundredths))
+        : possibleMaxHundredths;
       const candidates = [];
+      const fixed = {
+        p2: Number.isInteger(fixedHundredths.p2) ? fixedHundredths.p2 : null,
+        p31: Number.isInteger(fixedHundredths.p31) ? fixedHundredths.p31 : null,
+        p32: Number.isInteger(fixedHundredths.p32) ? fixedHundredths.p32 : null
+      };
 
-      for (let y = Math.ceil(maxHundredths * 0.45); y <= maxHundredths; y += 1) {
+      if (Object.values(fixed).some(value => value !== null && (value < 0 || value > limitHundredths))) {
+        return null;
+      }
+
+      const yStart = fixed.p31 ?? Math.ceil(possibleMaxHundredths * 0.45);
+      const yEnd = fixed.p31 ?? possibleMaxHundredths;
+      for (let y = yStart; y <= yEnd; y += 1) {
+        if (y > limitHundredths) break;
         const p31Cost = frameworkCostCents(17000, y);
         const remaining = totalCents - p31Cost;
         if (remaining < 0) break;
         if (remaining % unitGcd !== 0) continue;
 
         const n = remaining / unitGcd;
-        const xBase = ((n * 21) % 38 + 38) % 38;
-        const maxX = Math.floor(n / 29);
-        if (xBase > maxX) continue;
-
-        const minK = Math.ceil((1 - xBase) / 38);
-        const maxK = Math.floor(maxX / 38);
-        const candidateKs = [
-          Math.max(minK, Math.min(maxK, Math.round((maxK + minK) / 2))),
-          minK,
-          maxK
-        ];
-
-        candidateKs.forEach((k) => {
-          const x = xBase + 38 * k;
-          const z = (n - 29 * x) / 38;
+        const pushCandidate = (x, z) => {
           if (x < 0 || z < 0 || !Number.isInteger(z)) return;
+          if (x > limitHundredths || z > limitHundredths) return;
+          if (fixed.p2 !== null && x !== fixed.p2) return;
+          if (fixed.p32 !== null && z !== fixed.p32) return;
           const totalMonthsHundredths = x + y + z;
           if (!totalMonthsHundredths) return;
           const p31Share = y / totalMonthsHundredths;
@@ -1244,7 +1276,36 @@
           const hasAllLevelsPenalty = (x > 0 ? 0 : 1) + (z > 0 ? 0 : 1);
           const score = hasAllLevelsPenalty * 100 + Math.random();
           candidates.push({ p2: x, p31: y, p32: z, p31Share, score });
-        });
+        };
+
+        if (fixed.p2 !== null && fixed.p32 !== null) {
+          if (29 * fixed.p2 + 38 * fixed.p32 === n) pushCandidate(fixed.p2, fixed.p32);
+          continue;
+        }
+
+        if (fixed.p2 !== null) {
+          const z = (n - 29 * fixed.p2) / 38;
+          pushCandidate(fixed.p2, z);
+          continue;
+        }
+
+        if (fixed.p32 !== null) {
+          const x = (n - 38 * fixed.p32) / 29;
+          pushCandidate(x, fixed.p32);
+          continue;
+        }
+
+        const xBase = ((n * 21) % 38 + 38) % 38;
+        const maxX = Math.min(Math.floor(n / 29), limitHundredths);
+        if (xBase > maxX) continue;
+
+        const minK = Math.ceil((0 - xBase) / 38);
+        const maxK = Math.floor(maxX / 38);
+        for (let k = minK; k <= maxK; k += 1) {
+          const x = xBase + 38 * k;
+          const z = (n - 29 * x) / 38;
+          pushCandidate(x, z);
+        }
       }
 
       if (!candidates.length) return null;
@@ -1259,8 +1320,9 @@
 
     function getFrameworkRows() {
       const totalCents = moneyToCents($("#frameworkTotal").value);
-      const split = findFrameworkSplit(totalCents);
-      if (!split) return { rows: [], totalCents, error: "无法在“人月最多两位小数、P3-1占比60%-95%、总费用完全一致”的条件下拆分。请确认总额是否为5元的整数倍。" };
+      const maxHundredths = getFrameworkMaxHundredths();
+      const split = findFrameworkSplit(totalCents, frameworkManualHundredths, maxHundredths);
+      if (!split) return { rows: [], totalCents, error: "无法在“人月最多两位小数、P3-1占比60%-95%、总费用完全一致、未超过最高人月”的条件下拆分。请确认总额是否为5元的整数倍，或调整已手动修改的人月。" };
 
       const hundredths = [split.p2, split.p31, split.p32];
       const rows = frameworkRates.map((item, index) => {
@@ -1268,10 +1330,12 @@
         const fee = item.rate * months;
         return {
           no: index + 1,
+          key: ["p2", "p31", "p32"][index],
           level: item.level,
           rate: item.rate,
           months,
-          fee
+          fee,
+          locked: Number.isInteger(frameworkManualHundredths[["p2", "p31", "p32"][index]])
         };
       });
 
@@ -1309,7 +1373,9 @@
                   <td>${row.no}</td>
                   <td>${row.level}</td>
                   <td class="num">${num2.format(row.rate)}</td>
-                  <td class="num">${num2.format(row.months)}</td>
+                  <td class="num">
+                    <input class="inline-input framework-month-input" type="number" min="0" step="0.01" value="${row.months.toFixed(2)}" data-key="${row.key}" title="${row.locked ? "已按手动输入锁定" : "修改后自动调整其他职级"}">
+                  </td>
                   <td class="num">${num2.format(row.fee)}</td>
                 </tr>
               `).join("")}
@@ -1324,6 +1390,18 @@
           </table>
         </div>
       `;
+    }
+
+    function updateFrameworkManualValue(input) {
+      const key = input.dataset.key;
+      const value = parseMonthHundredths(input.value);
+      if (value === null) {
+        delete frameworkManualHundredths[key];
+      } else {
+        frameworkManualHundredths[key] = value;
+      }
+      frameworkRandomSeed = Math.random();
+      renderFramework();
     }
 
     function frameworkExcelHtml() {
@@ -1412,14 +1490,25 @@
     function bind() {
       $("#sourceText").addEventListener("input", render);
       $("#frameworkTotal").addEventListener("input", () => {
+        frameworkManualHundredths = {};
+        frameworkRandomSeed = Math.random();
+        renderFramework();
+      });
+      $("#frameworkMaxMonths").addEventListener("input", () => {
         frameworkRandomSeed = Math.random();
         renderFramework();
       });
       $("#rerollFrameworkBtn").addEventListener("click", () => {
+        frameworkManualHundredths = {};
         frameworkRandomSeed = Math.random();
         renderFramework();
       });
       $("#downloadFrameworkBtn").addEventListener("click", downloadFrameworkExcel);
+      $("#frameworkPreview").addEventListener("change", (event) => {
+        if (event.target.matches(".framework-month-input")) {
+          updateFrameworkManualValue(event.target);
+        }
+      });
       document.querySelectorAll(".tool-tab").forEach((button) => {
         button.addEventListener("click", () => {
           document.querySelectorAll(".tool-tab").forEach((item) => item.classList.remove("active"));
