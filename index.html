@@ -1318,7 +1318,15 @@
       const totalCents = moneyToCents($("#frameworkTotal").value);
       const maxHundredths = getFrameworkMaxHundredths();
       const split = findFrameworkSplit(totalCents, frameworkManualHundredths, maxHundredths);
-      if (!split) return { rows: [], totalCents, error: "无法在“人月最多两位小数、总费用完全一致、未超过最高人月”的条件下拆分。请确认总额是否为5元的整数倍，或调整最高人月/已手动修改的人月。" };
+      if (!split) {
+        const canSplitWithoutMaxLimit = Number.isFinite(maxHundredths)
+          && maxHundredths >= 0
+          && Boolean(findFrameworkSplit(totalCents, frameworkManualHundredths, Infinity));
+        const error = canSplitWithoutMaxLimit
+          ? "无法产出方案：当前最高人月限制过低，不管如何拆分都无法同时满足总费用完全一致和最高人月限制。请调高最高人月，或调整报价总额/已手动修改的人月。"
+          : "无法在“人月最多两位小数、总费用完全一致、未超过最高人月”的条件下拆分。请确认总额是否为5元的整数倍，或调整最高人月/已手动修改的人月。";
+        return { rows: [], totalCents, error };
+      }
 
       const hundredths = [split.p2, split.p31, split.p32];
       const rows = frameworkRates.map((item, index) => {
