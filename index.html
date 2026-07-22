@@ -1254,7 +1254,7 @@
         return null;
       }
 
-      const yStart = fixed.p31 ?? Math.ceil(possibleMaxHundredths * 0.45);
+      const yStart = fixed.p31 ?? 0;
       const yEnd = fixed.p31 ?? possibleMaxHundredths;
       for (let y = yStart; y <= yEnd; y += 1) {
         if (y > limitHundredths) break;
@@ -1272,9 +1272,9 @@
           const totalMonthsHundredths = x + y + z;
           if (!totalMonthsHundredths) return;
           const p31Share = y / totalMonthsHundredths;
-          if (p31Share < 0.6 || p31Share > 0.95) return;
+          const sharePenalty = p31Share >= 0.6 && p31Share <= 0.95 ? 0 : 1000;
           const hasAllLevelsPenalty = (x > 0 ? 0 : 1) + (z > 0 ? 0 : 1);
-          const score = hasAllLevelsPenalty * 100 + Math.random();
+          const score = sharePenalty + hasAllLevelsPenalty * 100 + Math.random();
           candidates.push({ p2: x, p31: y, p32: z, p31Share, score });
         };
 
@@ -1309,11 +1309,7 @@
       }
 
       if (!candidates.length) return null;
-      const usefulCandidates = candidates
-        .filter(item => item.p2 > 0 && item.p32 > 0)
-        .sort((a, b) => a.score - b.score)
-        .slice(0, 80);
-      const pool = usefulCandidates.length ? usefulCandidates : candidates.sort((a, b) => a.score - b.score).slice(0, 80);
+      const pool = candidates.sort((a, b) => a.score - b.score).slice(0, 80);
       const index = Math.floor(frameworkRandomSeed * pool.length) % pool.length;
       return pool[index];
     }
@@ -1322,7 +1318,7 @@
       const totalCents = moneyToCents($("#frameworkTotal").value);
       const maxHundredths = getFrameworkMaxHundredths();
       const split = findFrameworkSplit(totalCents, frameworkManualHundredths, maxHundredths);
-      if (!split) return { rows: [], totalCents, error: "无法在“人月最多两位小数、P3-1占比60%-95%、总费用完全一致、未超过最高人月”的条件下拆分。请确认总额是否为5元的整数倍，或调整已手动修改的人月。" };
+      if (!split) return { rows: [], totalCents, error: "无法在“人月最多两位小数、总费用完全一致、未超过最高人月”的条件下拆分。请确认总额是否为5元的整数倍，或调整最高人月/已手动修改的人月。" };
 
       const hundredths = [split.p2, split.p31, split.p32];
       const rows = frameworkRates.map((item, index) => {
