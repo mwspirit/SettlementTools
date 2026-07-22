@@ -1240,7 +1240,7 @@
       }
 
       const possibleMaxHundredths = Math.floor(totalCents / frameworkCostCents(14500, 1));
-      const limitHundredths = Number.isFinite(maxLimitHundredths)
+      const totalLimitHundredths = Number.isFinite(maxLimitHundredths)
         ? Math.min(possibleMaxHundredths, Math.floor(maxLimitHundredths))
         : possibleMaxHundredths;
       const candidates = [];
@@ -1250,14 +1250,14 @@
         p32: Number.isInteger(fixedHundredths.p32) ? fixedHundredths.p32 : null
       };
 
-      if (Object.values(fixed).some(value => value !== null && (value < 0 || value > limitHundredths))) {
+      if (Object.values(fixed).some(value => value !== null && (value < 0 || value > totalLimitHundredths))) {
         return null;
       }
 
       const yStart = fixed.p31 ?? 0;
       const yEnd = fixed.p31 ?? possibleMaxHundredths;
       for (let y = yStart; y <= yEnd; y += 1) {
-        if (y > limitHundredths) break;
+        if (y > totalLimitHundredths) break;
         const p31Cost = frameworkCostCents(17000, y);
         const remaining = totalCents - p31Cost;
         if (remaining < 0) break;
@@ -1266,11 +1266,11 @@
         const n = remaining / unitGcd;
         const pushCandidate = (x, z) => {
           if (x < 0 || z < 0 || !Number.isInteger(z)) return;
-          if (x > limitHundredths || z > limitHundredths) return;
           if (fixed.p2 !== null && x !== fixed.p2) return;
           if (fixed.p32 !== null && z !== fixed.p32) return;
           const totalMonthsHundredths = x + y + z;
           if (!totalMonthsHundredths) return;
+          if (totalMonthsHundredths > totalLimitHundredths) return;
           const p31Share = y / totalMonthsHundredths;
           const sharePenalty = p31Share >= 0.6 && p31Share <= 0.95 ? 0 : 1000;
           const hasAllLevelsPenalty = (x > 0 ? 0 : 1) + (z > 0 ? 0 : 1);
@@ -1296,7 +1296,7 @@
         }
 
         const xBase = ((n * 21) % 38 + 38) % 38;
-        const maxX = Math.min(Math.floor(n / 29), limitHundredths);
+        const maxX = Math.min(Math.floor(n / 29), totalLimitHundredths - y);
         if (xBase > maxX) continue;
 
         const minK = Math.ceil((0 - xBase) / 38);
