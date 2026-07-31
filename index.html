@@ -727,7 +727,7 @@
           <div class="panel-body">
             <label class="field">
               报价总额（元）
-              <input id="frameworkTotal" type="number" min="0" step="0.01" value="300000">
+              <input id="frameworkTotal" type="number" min="0" max="100000000" step="0.01" value="300000">
             </label>
             <label class="field">
               最高人月（可选）
@@ -841,6 +841,7 @@
 
     const yuan = new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" });
     const num2 = new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const frameworkMaxTotalCents = 100000000 * 100;
     let currentRows = [];
     let frameworkRandomSeed = Math.random();
     let frameworkManualHundredths = {};
@@ -848,7 +849,17 @@
     const $ = (selector) => document.querySelector(selector);
 
     function parseDate(value) {
-      return new Date(`${value}T00:00:00`);
+      const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!match) return null;
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      const date = new Date(year, month - 1, day);
+      return date.getFullYear() === year
+        && date.getMonth() === month - 1
+        && date.getDate() === day
+        ? date
+        : null;
     }
 
     function formatDate(date) {
@@ -883,9 +894,9 @@
     }
 
     function settlementMonthForDate(date) {
-      const day = date.getDate();
-      const base = day <= 25 ? date : addMonths(date, 1);
-      return yyyymm(base.getFullYear(), base.getMonth());
+      const monthOffset = date.getDate() <= 25 ? 0 : 1;
+      const settlementMonth = new Date(date.getFullYear(), date.getMonth() + monthOffset, 1);
+      return yyyymm(settlementMonth.getFullYear(), settlementMonth.getMonth());
     }
 
     function nextSettlementMonth(monthText) {
@@ -930,7 +941,9 @@
     function parsePeople(text) {
       const rows = [];
       const errors = [];
-      text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line, index) => {
+      text.split(/\r?\n/).forEach((sourceLine, index) => {
+        const line = sourceLine.trim();
+        if (!line) return;
         const match = line.match(/^(.+?)[：:]\s*(\d{4}-\d{2}-\d{2})\s*到\s*(\d{4}-\d{2}-\d{2})\s+([0-9]+(?:\.[0-9]+)?)$/);
         if (!match) {
           errors.push(`第 ${index + 1} 行无法识别：${line}`);
@@ -938,6 +951,10 @@
         }
         const start = parseDate(match[2]);
         const end = parseDate(match[3]);
+        if (!start || !end) {
+          errors.push(`第 ${index + 1} 行包含无效日期：${line}`);
+          return;
+        }
         if (start > end) {
           errors.push(`第 ${index + 1} 行开始日期晚于结束日期：${line}`);
           return;
@@ -1204,7 +1221,32 @@
 
     async function copyTable() {
       if (!currentRows.length) return;
-      await navigator.clipboard.writeText(tableToTsv());
+      const button = $("#copyBtn");
+      const originalText = button.textContent;
+      try {
+        const text = tableToTsv();
+        if (navigator.clipboard?.writeText && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.setAttribute("readonly", "");
+          textarea.style.cssText = "position:fixed;left:-9999px;top:0";
+          document.body.append(textarea);
+          textarea.select();
+          const copied = document.execCommand("copy");
+          textarea.remove();
+          if (!copied) throw new Error("浏览器拒绝复制");
+        }
+        button.textContent = "已复制";
+      } catch (error) {
+        console.error("复制表格失败", error);
+        button.textContent = "复制失败";
+      } finally {
+        window.setTimeout(() => {
+          button.textContent = originalText;
+        }, 1800);
+      }
     }
 
     function moneyToCents(value) {
@@ -1232,6 +1274,7 @@
 
     function findFrameworkSplit(totalCents, fixedHundredths = {}, maxLimitHundredths = Infinity) {
       if (!Number.isFinite(totalCents) || totalCents <= 0) return null;
+      if (totalCents > frameworkMaxTotalCents) return null;
       if (maxLimitHundredths < 0) return null;
 
       const unitGcd = 500;
@@ -1244,6 +1287,8 @@
         ? Math.min(possibleMaxHundredths, Math.floor(maxLimitHundredths))
         : possibleMaxHundredths;
       const candidates = [];
+      let bestPenalty = Infinity;
+      let matchingCandidateCount = 0;
       const fixed = {
         p2: Number.isInteger(fixedHundredths.p2) ? fixedHundredths.p2 : null,
         p31: Number.isInteger(fixedHundredths.p31) ? fixedHundredths.p31 : null,
@@ -1274,8 +1319,22 @@
           const p31Share = y / totalMonthsHundredths;
           const sharePenalty = p31Share >= 0.6 && p31Share <= 0.95 ? 0 : 1000;
           const hasAllLevelsPenalty = (x > 0 ? 0 : 1) + (z > 0 ? 0 : 1);
-          const score = sharePenalty + hasAllLevelsPenalty * 100 + Math.random();
-          candidates.push({ p2: x, p31: y, p32: z, p31Share, score });
+          const penalty = sharePenalty + hasAllLevelsPenalty * 100;
+          if (penalty < bestPenalty) {
+            bestPenalty = penalty;
+            matchingCandidateCount = 0;
+            candidates.length = 0;
+          }
+          if (penalty !== bestPenalty) return;
+
+          matchingCandidateCount += 1;
+          const candidate = { p2: x, p31: y, p32: z, p31Share };
+          if (candidates.length < 80) {
+            candidates.push(candidate);
+          } else {
+            const replacementIndex = Math.floor(Math.random() * matchingCandidateCount);
+            if (replacementIndex < candidates.length) candidates[replacementIndex] = candidate;
+          }
         };
 
         if (fixed.p2 !== null && fixed.p32 !== null) {
@@ -1309,14 +1368,20 @@
       }
 
       if (!candidates.length) return null;
-      const pool = candidates.sort((a, b) => a.score - b.score).slice(0, 80);
-      const index = Math.floor(frameworkRandomSeed * pool.length) % pool.length;
-      return pool[index];
+      const index = Math.floor(frameworkRandomSeed * candidates.length) % candidates.length;
+      return candidates[index];
     }
 
     function getFrameworkRows() {
       const totalCents = moneyToCents($("#frameworkTotal").value);
       const maxHundredths = getFrameworkMaxHundredths();
+      if (totalCents > frameworkMaxTotalCents) {
+        return {
+          rows: [],
+          totalCents,
+          error: `报价总额不能超过${num2.format(frameworkMaxTotalCents / 100)}元。`
+        };
+      }
       const split = findFrameworkSplit(totalCents, frameworkManualHundredths, maxHundredths);
       if (!split) {
         const canSplitWithoutMaxLimit = Number.isFinite(maxHundredths)
@@ -1493,14 +1558,19 @@
 
     function bind() {
       $("#sourceText").addEventListener("input", render);
+      let frameworkRenderTimer = 0;
+      const scheduleFrameworkRender = () => {
+        window.clearTimeout(frameworkRenderTimer);
+        frameworkRenderTimer = window.setTimeout(renderFramework, 180);
+      };
       $("#frameworkTotal").addEventListener("input", () => {
         frameworkManualHundredths = {};
         frameworkRandomSeed = Math.random();
-        renderFramework();
+        scheduleFrameworkRender();
       });
       $("#frameworkMaxMonths").addEventListener("input", () => {
         frameworkRandomSeed = Math.random();
-        renderFramework();
+        scheduleFrameworkRender();
       });
       $("#rerollFrameworkBtn").addEventListener("click", () => {
         frameworkManualHundredths = {};
