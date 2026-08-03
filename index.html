@@ -783,6 +783,8 @@
     </div>
   </div>
 
+  <script src="settlement-core.js"></script>
+  <script src="xlsx-export.js"></script>
   <script>
     const sampleText = `张示例：2025-07-01到2025-08-13 20000
 李测试：2025-06-25到2026-03-11 16000
@@ -841,84 +843,30 @@
 
     const yuan = new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" });
     const num2 = new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const frameworkMaxTotalCents = 100000000 * 100;
+    const {
+      MAX_FRAMEWORK_TOTAL_CENTS: frameworkMaxTotalCents,
+      formatDate,
+      addDays,
+      periodBySettlementMonth,
+      settlementMonthForDate,
+      nextSettlementMonth,
+      decimalToCents,
+      parsePeople,
+      calculateProratedFeeCents,
+      parseMonthHundredths
+    } = SettlementCore;
     let currentRows = [];
     let frameworkRandomSeed = Math.random();
     let frameworkManualHundredths = {};
 
     const $ = (selector) => document.querySelector(selector);
 
-    function parseDate(value) {
-      const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-      if (!match) return null;
-      const year = Number(match[1]);
-      const month = Number(match[2]);
-      const day = Number(match[3]);
-      const date = new Date(year, month - 1, day);
-      return date.getFullYear() === year
-        && date.getMonth() === month - 1
-        && date.getDate() === day
-        ? date
-        : null;
-    }
-
-    function formatDate(date) {
-      const y = date.getFullYear();
-      const m = String(date.getMonth() + 1).padStart(2, "0");
-      const d = String(date.getDate()).padStart(2, "0");
-      return `${y}-${m}-${d}`;
-    }
-
-    function addDays(date, days) {
-      const next = new Date(date);
-      next.setDate(next.getDate() + days);
-      return next;
-    }
-
-    function addMonths(date, months) {
-      return new Date(date.getFullYear(), date.getMonth() + months, date.getDate());
-    }
-
-    function yyyymm(year, monthIndex) {
-      return `${year}${String(monthIndex + 1).padStart(2, "0")}`;
-    }
-
-    function periodBySettlementMonth(monthText) {
-      const year = Number(monthText.slice(0, 4));
-      const month = Number(monthText.slice(4, 6)) - 1;
-      return {
-        month: monthText,
-        start: new Date(year, month - 1, 26),
-        end: new Date(year, month, 25)
-      };
-    }
-
-    function settlementMonthForDate(date) {
-      const monthOffset = date.getDate() <= 25 ? 0 : 1;
-      const settlementMonth = new Date(date.getFullYear(), date.getMonth() + monthOffset, 1);
-      return yyyymm(settlementMonth.getFullYear(), settlementMonth.getMonth());
-    }
-
-    function nextSettlementMonth(monthText) {
-      const p = periodBySettlementMonth(monthText);
-      return settlementMonthForDate(addDays(p.end, 1));
-    }
-
     function isWorkday(date) {
-      const key = formatDate(date);
-      if (makeupWorkDates.has(key)) return true;
-      if (holidayDates.has(key)) return false;
-      const day = date.getDay();
-      return day >= 1 && day <= 5;
+      return SettlementCore.isWorkday(date, holidayDates, makeupWorkDates);
     }
 
     function countWorkdays(start, end) {
-      if (start > end) return 0;
-      let count = 0;
-      for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
-        if (isWorkday(d)) count += 1;
-      }
-      return count;
+      return SettlementCore.countWorkdays(start, end, holidayDates, makeupWorkDates);
     }
 
     function escapeHtml(value) {
@@ -932,41 +880,6 @@
     function roundToMax15Decimals(value) {
       if (!Number.isFinite(value)) return 0;
       return Number(value.toFixed(15));
-    }
-
-    function rawNumber(value) {
-      return roundToMax15Decimals(value).toString();
-    }
-
-    function parsePeople(text) {
-      const rows = [];
-      const errors = [];
-      text.split(/\r?\n/).forEach((sourceLine, index) => {
-        const line = sourceLine.trim();
-        if (!line) return;
-        const match = line.match(/^(.+?)[：:]\s*(\d{4}-\d{2}-\d{2})\s*到\s*(\d{4}-\d{2}-\d{2})\s+([0-9]+(?:\.[0-9]+)?)$/);
-        if (!match) {
-          errors.push(`第 ${index + 1} 行无法识别：${line}`);
-          return;
-        }
-        const start = parseDate(match[2]);
-        const end = parseDate(match[3]);
-        if (!start || !end) {
-          errors.push(`第 ${index + 1} 行包含无效日期：${line}`);
-          return;
-        }
-        if (start > end) {
-          errors.push(`第 ${index + 1} 行开始日期晚于结束日期：${line}`);
-          return;
-        }
-        rows.push({
-          name: match[1].trim(),
-          start,
-          end,
-          price: Number(match[4])
-        });
-      });
-      return { rows, errors };
     }
 
     function buildRemark(person, period) {
@@ -999,13 +912,14 @@
               sort: `${month}-${String(personIndex).padStart(3, "0")}`,
               month,
               name: person.name,
+              priceCents: person.priceCents,
               price: person.price,
               settleStart: formatDate(settleStart),
               settleEnd: formatDate(settleEnd),
               shouldDays,
               actualDays,
               workload,
-              fee: shouldDays ? roundToMax15Decimals(actualDays / shouldDays * person.price) : 0,
+              feeCents: calculateProratedFeeCents(person.priceCents, actualDays, shouldDays),
               remark: buildRemark(person, period)
             });
           }
@@ -1022,13 +936,13 @@
       const built = buildRows();
       currentRows = built.rows;
       const monthClassMap = buildMonthClassMap(currentRows);
-      const totalFee = currentRows.reduce((sum, row) => sum + row.fee, 0);
+      const totalFeeCents = currentRows.reduce((sum, row) => sum + row.feeCents, 0);
       const totalWorkload = currentRows.reduce((sum, row) => sum + row.workload, 0);
       $("#errorBox").textContent = built.errors.join("\n");
       $("#employeeCount").textContent = built.employeeCount;
       $("#rowCount").textContent = currentRows.length;
       $("#totalWorkload").textContent = num2.format(totalWorkload);
-      $("#totalFee").textContent = yuan.format(totalFee);
+      $("#totalFee").textContent = yuan.format(totalFeeCents / 100);
       $("#monthRange").textContent = currentRows.length
         ? `${currentRows[0].month} - ${currentRows[currentRows.length - 1].month}`
         : "-";
@@ -1056,13 +970,13 @@
                   <td class="num">${row.shouldDays}</td>
                   <td class="num">${row.actualDays}</td>
                   <td class="num">${num2.format(row.workload)}</td>
-                  <td class="num">${num2.format(row.fee)}</td>
+                  <td class="num">${num2.format(row.feeCents / 100)}</td>
                   <td>${escapeHtml(row.remark)}</td>
                 </tr>
               `).join("")}
               <tr class="total-row">
                 <td colspan="8">合计</td>
-                <td class="num">${num2.format(totalFee)}</td>
+                <td class="num">${num2.format(totalFeeCents / 100)}</td>
                 <td></td>
               </tr>
             </tbody>
@@ -1083,11 +997,12 @@
           row.shouldDays,
           row.actualDays,
           num2.format(row.workload),
-          num2.format(row.fee),
+          num2.format(row.feeCents / 100),
           row.remark
         ].join("\t"));
       });
-      lines.push(["合计", "", "", "", "", "", "", "", num2.format(currentRows.reduce((sum, row) => sum + row.fee, 0)), ""].join("\t"));
+      const totalFeeCents = currentRows.reduce((sum, row) => sum + row.feeCents, 0);
+      lines.push(["合计", "", "", "", "", "", "", "", num2.format(totalFeeCents / 100), ""].join("\t"));
       return lines.join("\n");
     }
 
@@ -1152,71 +1067,39 @@
       $("#calendarModal").setAttribute("aria-hidden", "true");
     }
 
-    function excelHtml() {
-      const monthClassMap = buildMonthClassMap(currentRows);
-      const totalFee = currentRows.reduce((sum, row) => sum + row.fee, 0);
-      const bodyRows = currentRows.map((row) => `
-        <tr class="${monthClassMap.get(row.month)}">
-          <td style="mso-number-format:'\\@';">${row.month}</td>
-          <td>${escapeHtml(row.name)}</td>
-          <td>${row.price.toFixed(2)}</td>
-          <td class="date-cell">${row.settleStart}</td>
-          <td class="date-cell">${row.settleEnd}</td>
-          <td>${row.shouldDays}</td>
-          <td>${row.actualDays}</td>
-          <td class="two-decimal">${rawNumber(row.workload)}</td>
-          <td class="two-decimal">${rawNumber(row.fee)}</td>
-          <td>${escapeHtml(row.remark)}</td>
-        </tr>
-      `).join("");
-      const totalRow = `
-        <tr class="total-row">
-          <td colspan="8">合计</td>
-          <td class="two-decimal">${rawNumber(totalFee)}</td>
-          <td></td>
-        </tr>
-      `;
-
-      return `
-        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-        <head>
-          <meta charset="utf-8">
-          <style>
-            table { border-collapse: collapse; }
-            th, td { border: 1px solid #999; padding: 6px 8px; font-family: "Microsoft YaHei", Arial, sans-serif; text-align: center; }
-            th { background: #eeeeee; font-size: 14pt; font-weight: bold; }
-            .num { text-align: center; }
-            .two-decimal { mso-number-format: '0.00'; }
-            .date-cell { mso-number-format: "yyyy\\-mm\\-dd"; }
-            .month-a td { background: #d8f0ee; }
-            .month-b td { background: #f8d9dd; }
-            .total-row td { background: #eef3f7; font-weight: bold; }
-          </style>
-        </head>
-        <body>
-          <table class="compact-table">
-            <thead><tr>${columns.map(name => `<th style="background:#eeeeee;font-size:14pt;font-weight:bold;text-align:center;">${name}</th>`).join("")}</tr></thead>
-            <tbody>${bodyRows}${totalRow}</tbody>
-          </table>
-        </body>
-        </html>
-      `;
-    }
-
     function downloadExcel() {
       if (!currentRows.length) return;
-      const totalFee = currentRows.reduce((sum, row) => sum + row.fee, 0);
-      const feeText = num2.format(totalFee).replace(/,/g, "");
-      const filename = `项目结算明细-总费用${feeText}-${currentRows[0].month}-${currentRows[currentRows.length - 1].month}.xls`;
-      const blob = new Blob(["\ufeff", excelHtml()], { type: "application/vnd.ms-excel;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      const monthClassMap = buildMonthClassMap(currentRows);
+      const totalFeeCents = currentRows.reduce((sum, row) => sum + row.feeCents, 0);
+      const rows = [columns.map(value => ({ value, style: 1 }))];
+      currentRows.forEach(row => {
+        const alternate = monthClassMap.get(row.month) === "month-a";
+        const textStyle = alternate ? 3 : 5;
+        const numberStyle = alternate ? 4 : 6;
+        rows.push([
+          { value: row.month, style: textStyle },
+          { value: row.name, style: textStyle },
+          { value: row.priceCents / 100, type: "number", style: numberStyle },
+          { value: row.settleStart, style: textStyle },
+          { value: row.settleEnd, style: textStyle },
+          { value: row.shouldDays, type: "number", style: textStyle },
+          { value: row.actualDays, type: "number", style: textStyle },
+          { value: row.workload, type: "number", style: numberStyle },
+          { value: row.feeCents / 100, type: "number", style: numberStyle },
+          { value: row.remark, style: textStyle }
+        ]);
+      });
+      rows.push([
+        { value: "合计", style: 1 }, ...Array.from({ length: 7 }, () => ({ value: "", style: 1 })),
+        { value: totalFeeCents / 100, type: "number", style: 7 }, { value: "", style: 1 }
+      ]);
+      const feeText = num2.format(totalFeeCents / 100).replace(/,/g, "");
+      const filename = `项目结算明细-总费用${feeText}-${currentRows[0].month}-${currentRows[currentRows.length - 1].month}.xlsx`;
+      XlsxExporter.downloadWorkbook(filename, [{
+        name: "项目结算明细",
+        rows,
+        widths: [12, 12, 14, 14, 14, 12, 12, 14, 16, 24]
+      }]);
     }
 
     async function copyTable() {
@@ -1250,19 +1133,7 @@
     }
 
     function moneyToCents(value) {
-      return Math.round(Number(value || 0) * 100);
-    }
-
-    function frameworkCostCents(rate, hundredths) {
-      return rate * hundredths;
-    }
-
-    function parseMonthHundredths(value) {
-      const text = String(value ?? "").trim();
-      if (!text) return null;
-      const number = Number(text);
-      if (!Number.isFinite(number) || number < 0) return null;
-      return Math.round(number * 100);
+      return decimalToCents(value) ?? 0;
     }
 
     function getFrameworkMaxHundredths() {
@@ -1273,103 +1144,12 @@
     }
 
     function findFrameworkSplit(totalCents, fixedHundredths = {}, maxLimitHundredths = Infinity) {
-      if (!Number.isFinite(totalCents) || totalCents <= 0) return null;
-      if (totalCents > frameworkMaxTotalCents) return null;
-      if (maxLimitHundredths < 0) return null;
-
-      const unitGcd = 500;
-      if (totalCents % unitGcd !== 0) {
-        return null;
-      }
-
-      const possibleMaxHundredths = Math.floor(totalCents / frameworkCostCents(14500, 1));
-      const totalLimitHundredths = Number.isFinite(maxLimitHundredths)
-        ? Math.min(possibleMaxHundredths, Math.floor(maxLimitHundredths))
-        : possibleMaxHundredths;
-      const candidates = [];
-      let bestPenalty = Infinity;
-      let matchingCandidateCount = 0;
-      const fixed = {
-        p2: Number.isInteger(fixedHundredths.p2) ? fixedHundredths.p2 : null,
-        p31: Number.isInteger(fixedHundredths.p31) ? fixedHundredths.p31 : null,
-        p32: Number.isInteger(fixedHundredths.p32) ? fixedHundredths.p32 : null
-      };
-
-      if (Object.values(fixed).some(value => value !== null && (value < 0 || value > totalLimitHundredths))) {
-        return null;
-      }
-
-      const yStart = fixed.p31 ?? 0;
-      const yEnd = fixed.p31 ?? possibleMaxHundredths;
-      for (let y = yStart; y <= yEnd; y += 1) {
-        if (y > totalLimitHundredths) break;
-        const p31Cost = frameworkCostCents(17000, y);
-        const remaining = totalCents - p31Cost;
-        if (remaining < 0) break;
-        if (remaining % unitGcd !== 0) continue;
-
-        const n = remaining / unitGcd;
-        const pushCandidate = (x, z) => {
-          if (x < 0 || z < 0 || !Number.isInteger(z)) return;
-          if (fixed.p2 !== null && x !== fixed.p2) return;
-          if (fixed.p32 !== null && z !== fixed.p32) return;
-          const totalMonthsHundredths = x + y + z;
-          if (!totalMonthsHundredths) return;
-          if (totalMonthsHundredths > totalLimitHundredths) return;
-          const p31Share = y / totalMonthsHundredths;
-          const sharePenalty = p31Share >= 0.6 && p31Share <= 0.95 ? 0 : 1000;
-          const hasAllLevelsPenalty = (x > 0 ? 0 : 1) + (z > 0 ? 0 : 1);
-          const penalty = sharePenalty + hasAllLevelsPenalty * 100;
-          if (penalty < bestPenalty) {
-            bestPenalty = penalty;
-            matchingCandidateCount = 0;
-            candidates.length = 0;
-          }
-          if (penalty !== bestPenalty) return;
-
-          matchingCandidateCount += 1;
-          const candidate = { p2: x, p31: y, p32: z, p31Share };
-          if (candidates.length < 80) {
-            candidates.push(candidate);
-          } else {
-            const replacementIndex = Math.floor(Math.random() * matchingCandidateCount);
-            if (replacementIndex < candidates.length) candidates[replacementIndex] = candidate;
-          }
-        };
-
-        if (fixed.p2 !== null && fixed.p32 !== null) {
-          if (29 * fixed.p2 + 38 * fixed.p32 === n) pushCandidate(fixed.p2, fixed.p32);
-          continue;
-        }
-
-        if (fixed.p2 !== null) {
-          const z = (n - 29 * fixed.p2) / 38;
-          pushCandidate(fixed.p2, z);
-          continue;
-        }
-
-        if (fixed.p32 !== null) {
-          const x = (n - 38 * fixed.p32) / 29;
-          pushCandidate(x, fixed.p32);
-          continue;
-        }
-
-        const xBase = ((n * 21) % 38 + 38) % 38;
-        const maxX = Math.min(Math.floor(n / 29), totalLimitHundredths - y);
-        if (xBase > maxX) continue;
-
-        const minK = Math.ceil((0 - xBase) / 38);
-        const maxK = Math.floor(maxX / 38);
-        for (let k = minK; k <= maxK; k += 1) {
-          const x = xBase + 38 * k;
-          const z = (n - 29 * x) / 38;
-          pushCandidate(x, z);
-        }
-      }
-
-      if (!candidates.length) return null;
-      const index = Math.floor(frameworkRandomSeed * candidates.length) % candidates.length;
-      return candidates[index];
+      return SettlementCore.findFrameworkSplit(
+        totalCents,
+        fixedHundredths,
+        maxLimitHundredths,
+        frameworkRandomSeed
+      );
     }
 
     function getFrameworkRows() {
@@ -1396,14 +1176,14 @@
       const hundredths = [split.p2, split.p31, split.p32];
       const rows = frameworkRates.map((item, index) => {
         const months = hundredths[index] / 100;
-        const fee = item.rate * months;
+        const feeCents = item.rate * hundredths[index];
         return {
           no: index + 1,
           key: ["p2", "p31", "p32"][index],
           level: item.level,
           rate: item.rate,
           months,
-          fee,
+          feeCents,
           locked: Number.isInteger(frameworkManualHundredths[["p2", "p31", "p32"][index]])
         };
       });
@@ -1414,15 +1194,15 @@
     function renderFramework() {
       const built = getFrameworkRows();
       const total = built.totalCents / 100;
-      const feeTotal = built.rows.reduce((sum, row) => sum + row.fee, 0);
+      const feeTotalCents = built.rows.reduce((sum, row) => sum + row.feeCents, 0);
       const totalMonths = built.rows.reduce((sum, row) => sum + row.months, 0);
 
       $("#frameworkError").textContent = built.error;
       $("#frameworkTotalView").textContent = yuan.format(total);
       $("#frameworkMonthsView").textContent = num2.format(totalMonths);
       $("#frameworkP31Share").textContent = built.rows.length ? `${num2.format((built.p31Share || 0) * 100)}%` : "0.00%";
-      $("#frameworkFeeView").textContent = yuan.format(feeTotal);
-      $("#frameworkCheckView").textContent = built.rows.length && Math.round(feeTotal * 100) === built.totalCents ? "一致" : "-";
+      $("#frameworkFeeView").textContent = yuan.format(feeTotalCents / 100);
+      $("#frameworkCheckView").textContent = built.rows.length && feeTotalCents === built.totalCents ? "一致" : "-";
 
       if (!built.rows.length) {
         $("#frameworkPreview").innerHTML = '<div class="empty">暂无可预览数据</div>';
@@ -1445,7 +1225,7 @@
                   <td class="num">
                     <input class="inline-input framework-month-input" type="number" min="0" step="0.01" value="${row.months.toFixed(2)}" data-key="${row.key}" title="${row.locked ? "已按手动输入锁定" : "修改后自动调整其他职级"}">
                   </td>
-                  <td class="num">${num2.format(row.fee)}</td>
+                  <td class="num">${num2.format(row.feeCents / 100)}</td>
                 </tr>
               `).join("")}
               <tr class="total-row">
@@ -1453,7 +1233,7 @@
                 <td>总计</td>
                 <td></td>
                 <td></td>
-                <td class="num">${num2.format(feeTotal)}</td>
+                <td class="num">${num2.format(feeTotalCents / 100)}</td>
               </tr>
             </tbody>
           </table>
@@ -1473,65 +1253,32 @@
       renderFramework();
     }
 
-    function frameworkExcelHtml() {
-      const built = getFrameworkRows();
-      if (!built.rows.length) return "";
-      const feeTotal = built.rows.reduce((sum, row) => sum + row.fee, 0);
-      const bodyRows = built.rows.map(row => `
-        <tr>
-          <td>${row.no}</td>
-          <td>${row.level}</td>
-          <td class="num">${row.rate.toFixed(2)}</td>
-          <td class="num">${row.months.toFixed(2)}</td>
-          <td class="num">${row.fee.toFixed(2)}</td>
-        </tr>
-      `).join("");
-
-      return `
-        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-        <head>
-          <meta charset="utf-8">
-          <style>
-            table { border-collapse: collapse; }
-            th, td { border: 1px solid #999; padding: 6px 8px; font-family: "Microsoft YaHei", Arial, sans-serif; text-align: center; }
-            th { background: #eeeeee; font-size: 14pt; font-weight: bold; }
-            .num { mso-number-format: '0.00'; }
-            .total-row td { background: #eef3f7; font-weight: bold; }
-          </style>
-        </head>
-        <body>
-          <table>
-            <thead><tr>${frameworkColumns.map(name => `<th style="background:#eeeeee;font-size:14pt;font-weight:bold;text-align:center;">${name}</th>`).join("")}</tr></thead>
-            <tbody>
-              ${bodyRows}
-              <tr class="total-row">
-                <td>4</td>
-                <td>总计</td>
-                <td></td>
-                <td></td>
-                <td class="num">${feeTotal.toFixed(2)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </body>
-        </html>
-      `;
-    }
-
     function downloadFrameworkExcel() {
       const built = getFrameworkRows();
       if (!built.rows.length) return;
       const total = built.totalCents / 100;
-      const filename = `费用明细表-总金额${num2.format(total).replace(/,/g, "")}.xls`;
-      const blob = new Blob(["\ufeff", frameworkExcelHtml()], { type: "application/vnd.ms-excel;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      const feeTotalCents = built.rows.reduce((sum, row) => sum + row.feeCents, 0);
+      const rows = [frameworkColumns.map(value => ({ value, style: 1 }))];
+      built.rows.forEach(row => rows.push([
+        { value: row.no, type: "number", style: 0 },
+        { value: row.level, style: 0 },
+        { value: row.rate, type: "number", style: 2 },
+        { value: row.months, type: "number", style: 2 },
+        { value: row.feeCents / 100, type: "number", style: 2 }
+      ]));
+      rows.push([
+        { value: 4, type: "number", style: 1 },
+        { value: "总计", style: 1 },
+        { value: "", style: 1 },
+        { value: "", style: 1 },
+        { value: feeTotalCents / 100, type: "number", style: 7 }
+      ]);
+      const filename = `费用明细表-总金额${num2.format(total).replace(/,/g, "")}.xlsx`;
+      XlsxExporter.downloadWorkbook(filename, [{
+        name: "费用明细表",
+        rows,
+        widths: [10, 18, 16, 12, 18]
+      }]);
     }
 
     function initLogin() {
