@@ -455,6 +455,15 @@
       color: var(--muted);
     }
 
+    .text-output-body {
+      padding: 16px;
+    }
+
+    .text-output-body textarea {
+      min-height: min(62vh, 620px);
+      white-space: pre-wrap;
+    }
+
     .legend,
     .year-tabs {
       display: flex;
@@ -656,6 +665,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
             填入示例
           </button>
+          <button class="button" type="button" id="monthlyTextBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+            输出按月结算文本
+          </button>
           <button class="button primary" type="button" id="downloadBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>
             下载 Excel
@@ -783,6 +796,24 @@
     </div>
   </div>
 
+  <div class="modal" id="monthlyTextModal" aria-hidden="true">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="monthlyTextTitle">
+      <div class="modal-head">
+        <div>
+          <h2 id="monthlyTextTitle">按月结算文本</h2>
+          <p>按每月 26 日至次月 25 日的结算周期拆分，可直接编辑或复制。</p>
+        </div>
+        <div class="actions">
+          <button class="button primary" type="button" id="copyMonthlyTextBtn">复制文本</button>
+          <button class="button" type="button" id="closeMonthlyTextBtn">关闭</button>
+        </div>
+      </div>
+      <div class="text-output-body">
+        <textarea id="monthlyTextOutput" spellcheck="false"></textarea>
+      </div>
+    </div>
+  </div>
+
   <script src="settlement-core.js"></script>
   <script src="xlsx-export.js"></script>
   <script>
@@ -853,6 +884,7 @@
       decimalToCents,
       parsePeople,
       calculateProratedFeeCents,
+      buildMonthlySettlementText,
       parseMonthHundredths
     } = SettlementCore;
     let currentRows = [];
@@ -1065,6 +1097,48 @@
     function closeCalendar() {
       $("#calendarModal").classList.remove("open");
       $("#calendarModal").setAttribute("aria-hidden", "true");
+    }
+
+    function openMonthlyText() {
+      const built = buildMonthlySettlementText($("#sourceText").value, holidayDates, makeupWorkDates);
+      if (built.errors.length) {
+        $("#errorBox").textContent = built.errors.join("\n");
+        $("#sourceText").focus();
+        return;
+      }
+      if (!built.text) {
+        $("#errorBox").textContent = "请先输入结算信息";
+        $("#sourceText").focus();
+        return;
+      }
+      $("#monthlyTextOutput").value = built.text;
+      $("#monthlyTextModal").classList.add("open");
+      $("#monthlyTextModal").setAttribute("aria-hidden", "false");
+    }
+
+    function closeMonthlyText() {
+      $("#monthlyTextModal").classList.remove("open");
+      $("#monthlyTextModal").setAttribute("aria-hidden", "true");
+    }
+
+    async function copyMonthlyText() {
+      const output = $("#monthlyTextOutput");
+      const button = $("#copyMonthlyTextBtn");
+      const originalText = button.textContent;
+      try {
+        if (navigator.clipboard?.writeText && window.isSecureContext) {
+          await navigator.clipboard.writeText(output.value);
+        } else {
+          output.select();
+          if (!document.execCommand("copy")) throw new Error("浏览器拒绝复制");
+        }
+        button.textContent = "已复制";
+      } catch (error) {
+        console.error("复制按月结算文本失败", error);
+        button.textContent = "复制失败";
+      } finally {
+        window.setTimeout(() => { button.textContent = originalText; }, 1800);
+      }
     }
 
     function downloadExcel() {
@@ -1343,8 +1417,17 @@
       $("#calendarModal").addEventListener("click", (event) => {
         if (event.target.id === "calendarModal") closeCalendar();
       });
+      $("#monthlyTextBtn").addEventListener("click", openMonthlyText);
+      $("#copyMonthlyTextBtn").addEventListener("click", copyMonthlyText);
+      $("#closeMonthlyTextBtn").addEventListener("click", closeMonthlyText);
+      $("#monthlyTextModal").addEventListener("click", (event) => {
+        if (event.target.id === "monthlyTextModal") closeMonthlyText();
+      });
       document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") closeCalendar();
+        if (event.key === "Escape") {
+          closeCalendar();
+          closeMonthlyText();
+        }
       });
       document.querySelectorAll(".year-tabs button").forEach((button) => {
         button.addEventListener("click", () => {

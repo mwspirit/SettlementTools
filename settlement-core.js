@@ -127,6 +127,49 @@
     return Math.round(priceCents * actualDays / shouldDays);
   }
 
+  function formatCents(cents) {
+    return cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2);
+  }
+
+  function buildMonthlySettlementText(text, holidayDates = new Set(), makeupWorkDates = new Set()) {
+    const parsed = parsePeople(text);
+    if (parsed.errors.length || !parsed.rows.length) {
+      return { text: "", errors: parsed.errors, monthCount: 0 };
+    }
+
+    const groups = new Map();
+    parsed.rows.forEach(person => {
+      let month = settlementMonthForDate(person.start);
+      const lastMonth = settlementMonthForDate(person.end);
+      while (month <= lastMonth) {
+        const period = periodBySettlementMonth(month);
+        const start = person.start > period.start ? person.start : period.start;
+        const end = person.end < period.end ? person.end : period.end;
+        if (start <= end) {
+          if (!groups.has(month)) groups.set(month, { lines: [], totalFeeCents: 0 });
+          const group = groups.get(month);
+          const shouldDays = countWorkdays(period.start, period.end, holidayDates, makeupWorkDates);
+          const actualDays = countWorkdays(start, end, holidayDates, makeupWorkDates);
+          group.totalFeeCents += calculateProratedFeeCents(person.priceCents, actualDays, shouldDays);
+          group.lines.push(`${person.name}：${formatDate(start)}到${formatDate(end)} ${formatCents(person.priceCents)}`);
+        }
+        if (month === lastMonth) break;
+        month = nextSettlementMonth(month);
+      }
+    });
+
+    const months = [...groups.keys()].sort();
+    const years = new Set(months.map(month => month.slice(0, 4)));
+    const sections = months.map(month => {
+      const monthNumber = Number(month.slice(4, 6));
+      const group = groups.get(month);
+      const monthTitle = years.size === 1 ? `${monthNumber}月` : `${month.slice(0, 4)}年${monthNumber}月`;
+      const title = `${monthTitle}（总费用：${(group.totalFeeCents / 100).toFixed(2)}元）：`;
+      return [title, ...group.lines].join("\n");
+    });
+    return { text: sections.join("\n\n"), errors: [], monthCount: months.length };
+  }
+
   function parseMonthHundredths(value) {
     const text = String(value ?? "").trim();
     if (!text) return null;
@@ -227,6 +270,7 @@
     decimalToCents,
     parsePeople,
     calculateProratedFeeCents,
+    buildMonthlySettlementText,
     parseMonthHundredths,
     findFrameworkSplit
   };
