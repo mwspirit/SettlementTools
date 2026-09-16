@@ -210,8 +210,10 @@
       const totalMonths = x + y + z;
       if (!totalMonths || totalMonths > totalLimit) return;
       const p31Share = y / totalMonths;
+      const smallMonthsPenalty = [x, y, z].filter(value => value > 0 && value < 10).length * 10000;
       const penalty = (p31Share >= 0.6 && p31Share <= 0.95 ? 0 : 1000)
-        + ((x > 0 ? 0 : 1) + (z > 0 ? 0 : 1)) * 100;
+        + ((x > 0 ? 0 : 1) + (z > 0 ? 0 : 1)) * 100
+        + smallMonthsPenalty;
       if (penalty < bestPenalty) {
         bestPenalty = penalty;
         candidates.length = 0;
@@ -273,8 +275,10 @@
       const totalUnits = x + y + z;
       if (!totalUnits || totalUnits > totalUnitLimit) return;
       const p31Share = y / totalUnits;
+      const smallMonthsPenalty = [x, y, z].filter(value => value > 0 && value < 10000).length * 10000;
       const penalty = (p31Share >= 0.6 && p31Share <= 0.95 ? 0 : 1000)
-        + ((x > 0 ? 0 : 1) + (z > 0 ? 0 : 1)) * 100;
+        + ((x > 0 ? 0 : 1) + (z > 0 ? 0 : 1)) * 100
+        + smallMonthsPenalty;
       if (penalty < bestPenalty) {
         bestPenalty = penalty;
         candidates.length = 0;

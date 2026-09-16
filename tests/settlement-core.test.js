@@ -111,3 +111,11 @@ test("总费用精确到分时优先两位人月，必要时使用五位", () =>
     + Math.round(19000 * precise.p32);
   assert.equal(feeCents, 30000001);
 });
+
+test("费用足够时每个非零职级人月不少于0.10", () => {
+  for (const totalCents of [30000000, 30000001]) {
+    const split = core.findFrameworkSplit(totalCents, {}, Infinity, 0.42);
+    const months = [split.p2, split.p31, split.p32].map(value => value / 100);
+    assert.ok(months.every(value => value === 0 || value >= 0.1));
+  }
+});
