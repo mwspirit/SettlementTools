@@ -184,7 +184,7 @@
     return value - Math.floor(value);
   }
 
-  function findFrameworkSplit(totalCents, fixedHundredths = {}, maxLimitHundredths = Infinity, seed = 0.5) {
+  function findFrameworkSplitTwoDecimals(totalCents, fixedHundredths = {}, maxLimitHundredths = Infinity, seed = 0.5) {
     if (!Number.isSafeInteger(totalCents) || totalCents <= 0 || totalCents > MAX_FRAMEWORK_TOTAL_CENTS) return null;
     if (maxLimitHundredths < 0 || totalCents % 500 !== 0) return null;
 
@@ -250,6 +250,59 @@
         consider(x, y, (remainingUnits - 29 * x) / 38);
       });
     }
+
+    if (!candidates.length) return null;
+    return candidates[Math.floor(seededFraction(seed, candidates.length) * candidates.length)];
+  }
+
+  function findFrameworkSplit(totalCents, fixedHundredths = {}, maxLimitHundredths = Infinity, seed = 0.5) {
+    const twoDecimals = findFrameworkSplitTwoDecimals(totalCents, fixedHundredths, maxLimitHundredths, seed);
+    if (twoDecimals) return { ...twoDecimals, precision: 2 };
+    if (!Number.isSafeInteger(totalCents) || totalCents <= 0 || totalCents > MAX_FRAMEWORK_TOTAL_CENTS) return null;
+    if (Object.keys(fixedHundredths).some(key => Number.isFinite(fixedHundredths[key]))) return null;
+
+    // 五位小数单位下：P2 每单位 14.5 分、P3-1 每单位 17 分、P3-2 每单位 19 分。
+    // P2 单位取偶数即可保证每行费用和总费用都精确到分。
+    const totalUnitLimit = Number.isFinite(maxLimitHundredths)
+      ? Math.floor(maxLimitHundredths * 1000)
+      : Infinity;
+    const candidates = [];
+    let bestPenalty = Infinity;
+    const consider = (x, y, z) => {
+      if (![x, y, z].every(Number.isInteger) || x < 0 || y < 0 || z < 0 || x % 2 !== 0) return;
+      const totalUnits = x + y + z;
+      if (!totalUnits || totalUnits > totalUnitLimit) return;
+      const p31Share = y / totalUnits;
+      const penalty = (p31Share >= 0.6 && p31Share <= 0.95 ? 0 : 1000)
+        + ((x > 0 ? 0 : 1) + (z > 0 ? 0 : 1)) * 100;
+      if (penalty < bestPenalty) {
+        bestPenalty = penalty;
+        candidates.length = 0;
+      }
+      if (penalty === bestPenalty) candidates.push({ p2: x / 1000, p31: y / 1000, p32: z / 1000, p31Share, precision: 5 });
+    };
+
+    const qCandidates = new Set(Array.from({ length: 20 }, (_, index) => index + 1));
+    [0.05, 0.1, 0.15, 0.2].forEach(costShare => {
+      const center = Math.max(1, Math.floor(totalCents * costShare / 29));
+      for (let offset = -20; offset <= 20; offset += 1) qCandidates.add(center + offset);
+    });
+    [...qCandidates].filter(q => q > 0).sort((a, b) => a - b).forEach(q => {
+      const x = q * 2;
+      const remaining = totalCents - 29 * q;
+      if (remaining < 0) return;
+      const zBase = ((remaining * 9) % 17 + 17) % 17;
+      const yBase = (remaining - 19 * zBase) / 17;
+      if (!Number.isInteger(yBase) || yBase < 0) return;
+      const maxK = Math.floor(yBase / 19);
+      const totalBase = x + yBase + zBase;
+      const ks = new Set([0, maxK]);
+      [0.6, 0.7, 0.8, 0.9, 0.95].forEach(share => {
+        const target = (yBase - share * totalBase) / (19 - 2 * share);
+        [Math.floor(target), Math.ceil(target)].forEach(k => ks.add(Math.max(0, Math.min(maxK, k))));
+      });
+      ks.forEach(k => consider(x, yBase - 19 * k, zBase + 17 * k));
+    });
 
     if (!candidates.length) return null;
     return candidates[Math.floor(seededFraction(seed, candidates.length) * candidates.length)];

@@ -744,12 +744,12 @@
             </label>
             <label class="field">
               最高人月（可选）
-              <input id="frameworkMaxMonths" type="number" min="0" step="0.01" placeholder="不限制">
+              <input id="frameworkMaxMonths" type="number" min="0" step="0.01" value="49.9" placeholder="不限制">
             </label>
             <ul class="tips">
               <li>固定单价：P2 = 14500，P3-1 = 17000，P3-2及以上 = 19000。</li>
               <li>P3-1 工作量占比控制在 60% - 95%。</li>
-              <li>各职级人月最多保留小数点后两位，费用总计需等于输入总额，且不超过最高人月。</li>
+              <li>优先使用两位小数人月；必要时自动提高精度，确保费用总计精确到分。</li>
             </ul>
             <div id="frameworkError" class="error"></div>
           </div>
@@ -1243,14 +1243,14 @@
           && Boolean(findFrameworkSplit(totalCents, frameworkManualHundredths, Infinity));
         const error = canSplitWithoutMaxLimit
           ? "无法产出方案：当前最高人月限制过低，不管如何拆分都无法同时满足总费用完全一致和最高人月限制。请调高最高人月，或调整报价总额/已手动修改的人月。"
-          : "无法在“人月最多两位小数、总费用完全一致、未超过最高人月”的条件下拆分。请确认总额是否为5元的整数倍，或调整最高人月/已手动修改的人月。";
+          : "无法在“总费用精确到分、未超过最高人月”的条件下拆分。请调整最高人月或已手动修改的人月。";
         return { rows: [], totalCents, error };
       }
 
       const hundredths = [split.p2, split.p31, split.p32];
       const rows = frameworkRates.map((item, index) => {
         const months = hundredths[index] / 100;
-        const feeCents = item.rate * hundredths[index];
+        const feeCents = Math.round(item.rate * hundredths[index]);
         return {
           no: index + 1,
           key: ["p2", "p31", "p32"][index],
@@ -1258,6 +1258,7 @@
           rate: item.rate,
           months,
           feeCents,
+          precision: split.precision || 2,
           locked: Number.isInteger(frameworkManualHundredths[["p2", "p31", "p32"][index]])
         };
       });
@@ -1297,7 +1298,7 @@
                   <td>${row.level}</td>
                   <td class="num">${num2.format(row.rate)}</td>
                   <td class="num">
-                    <input class="inline-input framework-month-input" type="number" min="0" step="0.01" value="${row.months.toFixed(2)}" data-key="${row.key}" title="${row.locked ? "已按手动输入锁定" : "修改后自动调整其他职级"}">
+                    <input class="inline-input framework-month-input" type="number" min="0" step="0.00001" value="${row.months.toFixed(row.precision)}" data-key="${row.key}" title="${row.locked ? "已按手动输入锁定" : "修改后自动调整其他职级"}">
                   </td>
                   <td class="num">${num2.format(row.feeCents / 100)}</td>
                 </tr>

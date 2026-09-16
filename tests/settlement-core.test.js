@@ -92,10 +92,22 @@ test("费用拆分保持总费用完全一致", () => {
   }
 });
 
-test("费用拆分支持手动固定值并拒绝非5元整数倍", () => {
+test("费用拆分支持手动固定值", () => {
   const original = core.findFrameworkSplit(30000000, {}, Infinity, 0.42);
   const fixed = core.findFrameworkSplit(30000000, { p2: original.p2 }, Infinity, 0.7);
   assert.ok(fixed);
   assert.equal(fixed.p2, original.p2);
-  assert.equal(core.findFrameworkSplit(30000123), null);
+});
+
+test("总费用精确到分时优先两位人月，必要时使用五位", () => {
+  const twoDecimals = core.findFrameworkSplit(30000000, {}, Infinity, 0.42);
+  assert.equal(twoDecimals.precision, 2);
+
+  const precise = core.findFrameworkSplit(30000001, {}, Infinity, 0.42);
+  assert.ok(precise);
+  assert.equal(precise.precision, 5);
+  const feeCents = Math.round(14500 * precise.p2)
+    + Math.round(17000 * precise.p31)
+    + Math.round(19000 * precise.p32);
+  assert.equal(feeCents, 30000001);
 });
