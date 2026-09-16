@@ -27,6 +27,10 @@
     const normalized = cell && typeof cell === "object" && !Array.isArray(cell) ? cell : { value: cell };
     const reference = `${columnName(columnIndex)}${rowIndex + 1}`;
     const style = normalized.style ? ` s="${normalized.style}"` : "";
+    if (normalized.type === "formula" && normalized.formula) {
+      const cachedValue = Number.isFinite(normalized.value) ? `<v>${normalized.value}</v>` : "";
+      return `<c r="${reference}"${style}><f>${escapeXml(normalized.formula)}</f>${cachedValue}</c>`;
+    }
     if (normalized.type === "number" && Number.isFinite(normalized.value)) {
       return `<c r="${reference}"${style}><v>${normalized.value}</v></c>`;
     }

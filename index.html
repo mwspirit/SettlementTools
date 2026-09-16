@@ -1146,7 +1146,8 @@
       const monthClassMap = buildMonthClassMap(currentRows);
       const totalFeeCents = currentRows.reduce((sum, row) => sum + row.feeCents, 0);
       const rows = [columns.map(value => ({ value, style: 1 }))];
-      currentRows.forEach(row => {
+      currentRows.forEach((row, index) => {
+        const excelRow = index + 2;
         const alternate = monthClassMap.get(row.month) === "month-a";
         const textStyle = alternate ? 3 : 5;
         const numberStyle = alternate ? 4 : 6;
@@ -1159,13 +1160,19 @@
           { value: row.shouldDays, type: "number", style: textStyle },
           { value: row.actualDays, type: "number", style: textStyle },
           { value: row.workload, type: "number", style: numberStyle },
-          { value: row.feeCents / 100, type: "number", style: numberStyle },
+          { value: row.feeCents / 100, type: "formula", formula: `ROUND(C${excelRow}*H${excelRow},2)`, style: numberStyle },
           { value: row.remark, style: textStyle }
         ]);
       });
       rows.push([
         { value: "合计", style: 1 }, ...Array.from({ length: 7 }, () => ({ value: "", style: 1 })),
-        { value: totalFeeCents / 100, type: "number", style: 7 }, { value: "", style: 1 }
+        {
+          value: totalFeeCents / 100,
+          type: "formula",
+          formula: `SUM(I2:I${currentRows.length + 1})`,
+          style: 7
+        },
+        { value: "", style: 1 }
       ]);
       const feeText = num2.format(totalFeeCents / 100).replace(/,/g, "");
       const filename = `项目结算明细-总费用${feeText}-${currentRows[0].month}-${currentRows[currentRows.length - 1].month}.xlsx`;
@@ -1334,19 +1341,22 @@
       const total = built.totalCents / 100;
       const feeTotalCents = built.rows.reduce((sum, row) => sum + row.feeCents, 0);
       const rows = [frameworkColumns.map(value => ({ value, style: 1 }))];
-      built.rows.forEach(row => rows.push([
-        { value: row.no, type: "number", style: 0 },
-        { value: row.level, style: 0 },
-        { value: row.rate, type: "number", style: 2 },
-        { value: row.months, type: "number", style: 2 },
-        { value: row.feeCents / 100, type: "number", style: 2 }
-      ]));
+      built.rows.forEach((row, index) => {
+        const excelRow = index + 2;
+        rows.push([
+          { value: row.no, type: "number", style: 0 },
+          { value: row.level, style: 0 },
+          { value: row.rate, type: "number", style: 2 },
+          { value: row.months, type: "number", style: 2 },
+          { value: row.feeCents / 100, type: "formula", formula: `ROUND(C${excelRow}*D${excelRow},2)`, style: 2 }
+        ]);
+      });
       rows.push([
         { value: 4, type: "number", style: 1 },
         { value: "总计", style: 1 },
         { value: "", style: 1 },
         { value: "", style: 1 },
-        { value: feeTotalCents / 100, type: "number", style: 7 }
+        { value: feeTotalCents / 100, type: "formula", formula: "SUM(E2:E4)", style: 7 }
       ]);
       const filename = `费用明细表-总金额${num2.format(total).replace(/,/g, "")}.xlsx`;
       XlsxExporter.downloadWorkbook(filename, [{
