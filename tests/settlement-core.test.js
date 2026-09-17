@@ -119,3 +119,17 @@ test("费用足够时每个非零职级人月不少于0.10", () => {
     assert.ok(months.every(value => value === 0 || value >= 0.1));
   }
 });
+
+test("需要高精度时尽量只有一行超过两位小数", () => {
+  for (const totalCents of [30000001, 30000023, 12345678]) {
+    const split = core.findFrameworkSplit(totalCents, {}, Infinity, 0.42);
+    assert.ok(split);
+    const highPrecisionRows = [split.p2, split.p31, split.p32]
+      .filter(value => Math.abs(value - Math.round(value)) > 1e-9).length;
+    assert.ok(highPrecisionRows <= 1, `${totalCents} 分不应有多行高精度人月`);
+    const feeCents = Math.round(14500 * split.p2)
+      + Math.round(17000 * split.p31)
+      + Math.round(19000 * split.p32);
+    assert.equal(feeCents, totalCents);
+  }
+});

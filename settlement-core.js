@@ -275,8 +275,10 @@
       const totalUnits = x + y + z;
       if (!totalUnits || totalUnits > totalUnitLimit) return;
       const p31Share = y / totalUnits;
+      const highPrecisionRows = [x, y, z].filter(value => value % 1000 !== 0).length;
       const smallMonthsPenalty = [x, y, z].filter(value => value > 0 && value < 10000).length * 10000;
-      const penalty = (p31Share >= 0.6 && p31Share <= 0.95 ? 0 : 1000)
+      const penalty = highPrecisionRows * 100000
+        + (p31Share >= 0.6 && p31Share <= 0.95 ? 0 : 1000)
         + ((x > 0 ? 0 : 1) + (z > 0 ? 0 : 1)) * 100
         + smallMonthsPenalty;
       if (penalty < bestPenalty) {
@@ -285,6 +287,35 @@
       }
       if (penalty === bestPenalty) candidates.push({ p2: x / 1000, p31: y / 1000, p32: z / 1000, p31Share, precision: 5 });
     };
+
+    // 优先尝试只让 P3-1 一行承担分级尾差，P2、P3-2仍保持两位人月。
+    const xHundredthCandidates = new Set([0]);
+    [0.05, 0.1, 0.15, 0.2].forEach(costShare => {
+      const center = Math.max(0, Math.floor(totalCents * costShare / 14500));
+      for (let offset = -40; offset <= 40; offset += 1) {
+        if (center + offset >= 0) xHundredthCandidates.add(center + offset);
+      }
+    });
+    [...xHundredthCandidates].forEach(xHundredths => {
+      const remaining = totalCents - 14500 * xHundredths;
+      if (remaining < 0) return;
+      const zBase = ((remaining * 14) % 17 + 17) % 17;
+      const maxZ = Math.floor(remaining / 19000);
+      if (zBase > maxZ) return;
+      const maxK = Math.floor((maxZ - zBase) / 17);
+      const yBase = (remaining - 19000 * zBase) / 17;
+      const totalBase = xHundredths * 1000 + zBase * 1000 + yBase;
+      const ks = new Set([0, maxK]);
+      [0.6, 0.7, 0.8, 0.9, 0.95].forEach(share => {
+        const target = (yBase - share * totalBase) / (19000 - 2000 * share);
+        [Math.floor(target), Math.ceil(target)].forEach(k => ks.add(Math.max(0, Math.min(maxK, k))));
+      });
+      ks.forEach(k => {
+        const zHundredths = zBase + 17 * k;
+        const yUnits = yBase - 19000 * k;
+        consider(xHundredths * 1000, yUnits, zHundredths * 1000);
+      });
+    });
 
     const qCandidates = new Set(Array.from({ length: 20 }, (_, index) => index + 1));
     [0.05, 0.1, 0.15, 0.2].forEach(costShare => {
