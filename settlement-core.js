@@ -276,8 +276,12 @@
       if (!totalUnits || totalUnits > totalUnitLimit) return;
       const p31Share = y / totalUnits;
       const highPrecisionRows = [x, y, z].filter(value => value % 1000 !== 0).length;
+      const p2HighPrecisionPenalty = x % 1000 !== 0 ? 25000 : 0;
+      const p31HighPrecisionPenalty = y % 1000 !== 0 ? 50000 : 0;
       const smallMonthsPenalty = [x, y, z].filter(value => value > 0 && value < 10000).length * 10000;
       const penalty = highPrecisionRows * 100000
+        + p2HighPrecisionPenalty
+        + p31HighPrecisionPenalty
         + (p31Share >= 0.6 && p31Share <= 0.95 ? 0 : 1000)
         + ((x > 0 ? 0 : 1) + (z > 0 ? 0 : 1)) * 100
         + smallMonthsPenalty;
@@ -314,6 +318,29 @@
         const zHundredths = zBase + 17 * k;
         const yUnits = yBase - 19000 * k;
         consider(xHundredths * 1000, yUnits, zHundredths * 1000);
+      });
+    });
+
+    // 再尝试只让 P3-2 一行承担尾差，使 P3-1 尽量保持两位小数。
+    [...xHundredthCandidates].forEach(xHundredths => {
+      const remaining = totalCents - 14500 * xHundredths;
+      if (remaining < 0) return;
+      const yBase = ((remaining * 15) % 19 + 19) % 19;
+      const maxY = Math.floor(remaining / 17000);
+      if (yBase > maxY) return;
+      const maxK = Math.floor((maxY - yBase) / 19);
+      const zBaseUnits = (remaining - 17000 * yBase) / 19;
+      const yBaseUnits = yBase * 1000;
+      const totalBase = xHundredths * 1000 + yBaseUnits + zBaseUnits;
+      const ks = new Set([0, maxK]);
+      [0.6, 0.7, 0.8, 0.9, 0.95].forEach(share => {
+        const target = (share * totalBase - yBaseUnits) / (19000 - 2000 * share);
+        [Math.floor(target), Math.ceil(target)].forEach(k => ks.add(Math.max(0, Math.min(maxK, k))));
+      });
+      ks.forEach(k => {
+        const yHundredths = yBase + 19 * k;
+        const zUnits = zBaseUnits - 17000 * k;
+        consider(xHundredths * 1000, yHundredths * 1000, zUnits);
       });
     });
 

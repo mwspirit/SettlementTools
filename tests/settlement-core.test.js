@@ -133,3 +133,12 @@ test("需要高精度时尽量只有一行超过两位小数", () => {
     assert.equal(feeCents, totalCents);
   }
 });
+
+test("必须使用高精度时优先放在P3-2", () => {
+  for (const totalCents of [30000001, 30000023, 12345678]) {
+    const split = core.findFrameworkSplit(totalCents, {}, Infinity, 0.42);
+    assert.equal(Math.abs(split.p2 - Math.round(split.p2)) < 1e-9, true);
+    assert.equal(Math.abs(split.p31 - Math.round(split.p31)) < 1e-9, true);
+    assert.equal(Math.abs(split.p32 - Math.round(split.p32)) > 1e-9, true);
+  }
+});
